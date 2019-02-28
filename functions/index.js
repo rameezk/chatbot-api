@@ -1,11 +1,13 @@
 // The Cloud Functions for Firebase SDK to create Cloud Functions and setup triggers.
 const functions = require("firebase-functions");
+const { WebhookClient } = require("dialogflow-fulfillment");
 
 // The Firebase Admin SDK to access the Firebase Realtime Database.
 const admin = require("firebase-admin");
 admin.initializeApp(functions.config().firebase);
 
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, response) => {
+  const agent = new WebhookClient({ request, response });
   console.log("Request headers: " + JSON.stringify(request.headers));
   console.log("Request body: " + JSON.stringify(request.body));
 
@@ -22,17 +24,103 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
   // const inputContexts = request.body.queryResult.contexts; // https://dialogflow.com/docs/contexts
 
   if (action === "firebase.saveJobOffer") {
+    const jobOffer = extractJobOfferData(agent.context);
+    console.log("jobOffer", jobOffer);
+    if (verifyJobOffer(jobOffer)) {
+      saveJobOffer(jobOffer);
+    } else {
+      sendResponse("Aww 😕. Something weird happened. But don't worry, I've let my human know.");
+    }
+  }
+
+  function extractJobOfferData(data) {
+    const context = data.get("job_offer");
+    console.log("context", context);
+    const params = context.parameters;
+
+    // Get Name
+    const commonName = params["given_name"];
+    const unusualName = params["name"];
+    const name = commonName ? commonName : unusualName;
+
+    // Get Email
+    const email = params["email"];
+
+    // Get Company Name
+    const companyName = params["company_name"];
+
+    // Get Company Works For
+    const worksForCompany = params["company_works_for"];
+
+    // Get Position Title
+    const positionTitle = params["position_title"];
+
+    // Get Position Description
+    const positionDescription = params["position_description"];
+
+    // Get Position Type
+    const positionType = params["position_type"];
+
+    // Get Contract Details
+    const contractHourlyRate = params["hourly_rate"];
+    const contractTerm = params["contract_term"];
+
+    // Get Permanent Details
+    const annualSalary = params["annual_salary"];
+
+    // Get Renumeration
+    const renumeration = {
+      amount: undefined,
+      currency: "ZAR",
+      unit: undefined,
+    };
+    if (positionType === "permanent") {
+      renumeration.amount = annualSalary;
+      renumeration.unit = "yearly";
+    } else if (positionType === "contract") {
+      renumeration.amount = contractHourlyRate;
+      renumeration.unit = "hourly";
+    }
+
+    return {
+      headHunter: {
+        name: name,
+        email: email,
+        worksForCompany: worksForCompany,
+      },
+      company: {
+        name: companyName,
+      },
+      position: {
+        title: positionTitle,
+        description: positionDescription,
+        type: positionType,
+        term: positionType === "contract" ? contractTerm : "N/A",
+        renumeration: renumeration,
+      },
+    };
+  }
+
+  function verifyJobOffer(jobOffer) {
+    if (!jobOffer) return false;
+
+    return true;
+  }
+
+  function saveJobOffer(jobOffer) {
     admin
       .firestore()
       .collection("job-offers")
-      .add({
-        test: "test",
+      .add(jobOffer)
+      .then(snapshot => {
+        sendResponse(
+          "Awesome! I've bundled everything up and sent it my Human. If he likes what he sees he'll contact you. 👍🏽"
+        );
+        return snapshot;
       })
-      .then(ref => {
-        sendResponse("Saved job offer");
-        return ref;
-      })
-      .catch(err => console.log(err));
+      .catch(err => {
+        console.log(err);
+      });
   }
 
   // Function to send correctly formatted responses to Dialogflow which are then sent to the user
@@ -40,8 +128,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     // if the response is a string send it as a response to the user
     if (typeof responseToUser === "string") {
       let responseJson = {};
-      responseJson.speech = responseToUser; // spoken response
-      responseJson.displayText = responseToUser; // displayed response
+      responseJson.fulfillmentText = responseToUser;
       response.json(responseJson); // Send response to Dialogflow
     } else {
       // If the response to the user includes rich responses or contexts send them to Dialogflow
