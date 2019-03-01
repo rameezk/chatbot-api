@@ -83,6 +83,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     }
 
     return {
+      timestamp: admin.database.ServerValue.TIMESTAMP,
       headHunter: {
         name: name,
         email: email,
